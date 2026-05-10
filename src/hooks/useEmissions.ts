@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import type { Emission, NewEmissionPayload, UseEmissionsReturn } from '../types/emissions';
+import { emissionsRepository } from '../data/emissionsRepository';
+import type { Emission, MutationResult, NewEmissionPayload, UseEmissionsReturn } from '../types/emissions';
 
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error) {
@@ -15,78 +15,67 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
-function normalizeEmissionRow(row: Record<string, unknown>): Emission {
+function createMutationResult(ok: boolean, message?: string): MutationResult {
   return {
-    id: String(row.id ?? ''),
-    source_name: String(row.source_name ?? ''),
-    category: row.category as Emission['category'],
-    co2_kg: Number(row.co2_kg ?? 0),
-    recorded_at: String(row.recorded_at ?? new Date().toISOString()),
-    created_by: typeof row.created_by === 'string' ? row.created_by : undefined,
-    notes: typeof row.notes === 'string' ? row.notes : undefined,
+    ok,
+    message,
   };
 }
 
 export function useEmissions(): UseEmissionsReturn {
   const [emissions, setEmissions] = useState<Emission[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const isMountedRef = useRef(true);
 
-  const fetchEmissions = useCallback(async () => {
+  const fetchEmissions = useCallback(async (mode: 'initial' | 'refresh' = 'initial') => {
     if (!isMountedRef.current) {
       return;
     }
 
-    setIsLoading(true);
+    if (mode === 'initial') {
+      setIsLoading(true);
+    } else {
+      setIsRefreshing(true);
+    }
+
     setError(null);
 
-    if (!isSupabaseConfigured) {
+    try {
+      const data = await emissionsRepository.list();
+
       if (!isMountedRef.current) {
         return;
       }
 
-      setEmissions([]);
-      setError('Supabase no está configurado. Define las variables VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY.');
-      setIsLoading(false);
-      return;
-    }
-
-    const { data, error: fetchError } = await supabase
-      .from('emissions')
-      .select('*')
-      .order('recorded_at', { ascending: false });
-
-    if (fetchError) {
+      setEmissions(data);
+      setError(null);
+    } catch (errorValue: unknown) {
       if (!isMountedRef.current) {
         return;
       }
 
-      setEmissions([]);
-      setError(getErrorMessage(fetchError, 'No fue posible cargar las emisiones.'));
-      setIsLoading(false);
-      return;
+      setError(getErrorMessage(errorValue, 'No fue posible cargar las emisiones.'));
+    } finally {
+      if (!isMountedRef.current) {
+        return;
+      }
+
+      if (mode === 'initial') {
+        setIsLoading(false);
+      } else {
+        setIsRefreshing(false);
+      }
     }
-
-    const normalizedData = Array.isArray(data)
-      ? data.map((row) => normalizeEmissionRow(row as Record<string, unknown>))
-      : [];
-
-    if (!isMountedRef.current) {
-      return;
-    }
-
-    setEmissions(normalizedData);
-    setError(null);
-    setIsLoading(false);
   }, []);
 
   useEffect(() => {
     isMountedRef.current = true;
 
     void (async () => {
-      await fetchEmissions();
+      await fetchEmissions('initial');
     })();
 
     return () => {
@@ -95,64 +84,56 @@ export function useEmissions(): UseEmissionsReturn {
   }, [fetchEmissions]);
 
   const refreshEmissions = useCallback(async () => {
-    await fetchEmissions();
+    await fetchEmissions('refresh');
   }, [fetchEmissions]);
 
   const addEmission = useCallback(
-    async (payload: NewEmissionPayload) => {
+    async (payload: NewEmissionPayload): Promise<MutationResult> => {
       if (!isMountedRef.current) {
-        return;
+        return createMutationResult(false, 'La vista ya no está disponible.');
       }
 
       setIsSubmitting(true);
       setError(null);
 
-      if (!isSupabaseConfigured) {
+      try {
+        await emissionsRepository.add(payload);
+
         if (!isMountedRef.current) {
-          return;
+          return createMutationResult(false, 'La vista ya no está disponible.');
         }
 
-        setIsSubmitting(false);
-        setError('Supabase no está configurado. Define las variables VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY.');
-        return;
-      }
-
-      const { data: userData } = await supabase.auth.getUser();
-      const userId = userData.user?.id;
-
-      const insertPayload = {
-        ...payload,
-        ...(userId ? { created_by: userId } : {}),
-      };
-
-      const { error: insertError } = await supabase.from('emissions').insert([insertPayload]);
-
-      if (insertError) {
+        await fetchEmissions('refresh');
+        return createMutationResult(true, 'Emisión registrada con éxito.');
+      } catch (errorValue: unknown) {
         if (!isMountedRef.current) {
-          return;
+          return createMutationResult(false, 'La vista ya no está disponible.');
         }
 
-        setIsSubmitting(false);
-        setError(getErrorMessage(insertError, 'No fue posible registrar la emisión.'));
-        return;
+        const message = getErrorMessage(errorValue, 'No fue posible registrar la emisión.');
+        setError(message);
+        return createMutationResult(false, message);
+      } finally {
+        if (isMountedRef.current) {
+          setIsSubmitting(false);
+        }
       }
-
-      if (!isMountedRef.current) {
-        return;
-      }
-
-      setIsSubmitting(false);
-      await fetchEmissions();
     },
     [fetchEmissions],
   );
 
+  const clearError = useCallback(() => {
+    setError(null);
+  }, []);
+
   return {
     emissions,
     isLoading,
+    isRefreshing,
     isSubmitting,
     error,
     addEmission,
     refreshEmissions,
+    clearError,
   };
 }

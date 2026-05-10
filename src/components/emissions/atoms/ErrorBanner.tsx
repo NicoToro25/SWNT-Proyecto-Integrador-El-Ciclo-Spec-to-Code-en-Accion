@@ -5,7 +5,7 @@ export interface ErrorBannerProps {
 
 export function ErrorBanner({ message, onDismiss }: ErrorBannerProps) {
   return (
-    <div className="flex items-start justify-between gap-4 rounded-2xl border border-error-600/20 bg-error-100 px-4 py-3 text-error-600">
+    <div className="flex items-start justify-between gap-4 rounded-2xl border border-error-600/20 bg-error-100 px-4 py-3 text-error-600" role="alert" aria-live="assertive">
       <p className="text-sm font-medium">{message}</p>
       {onDismiss ? (
         <button

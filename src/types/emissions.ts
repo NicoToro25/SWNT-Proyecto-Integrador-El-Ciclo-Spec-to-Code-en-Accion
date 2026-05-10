@@ -32,11 +32,18 @@ export interface NewEmissionPayload {
   notes?: string;
 }
 
+export interface MutationResult {
+  ok: boolean;
+  message?: string;
+}
+
 export interface UseEmissionsReturn {
   emissions: Emission[];
   isLoading: boolean;
+  isRefreshing: boolean;
   isSubmitting: boolean;
   error: string | null;
-  addEmission: (payload: NewEmissionPayload) => Promise<void>;
+  addEmission: (payload: NewEmissionPayload) => Promise<MutationResult>;
   refreshEmissions: () => Promise<void>;
+  clearError: () => void;
 }

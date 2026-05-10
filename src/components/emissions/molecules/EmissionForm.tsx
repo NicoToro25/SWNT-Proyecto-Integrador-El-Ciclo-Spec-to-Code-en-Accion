@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 
-import { EMISSION_CATEGORIES, type EmissionCategory, type NewEmissionPayload } from '../../../types/emissions';
+import { EMISSION_CATEGORIES, type EmissionCategory, type MutationResult, type NewEmissionPayload } from '../../../types/emissions';
 import { FormFeedback } from '../atoms/FormFeedback';
 import { InputField } from '../atoms/InputField';
 import { NumberInput } from '../atoms/NumberInput';
@@ -8,7 +8,7 @@ import { SelectField } from '../atoms/SelectField';
 import { SubmitButton } from '../atoms/SubmitButton';
 
 export interface EmissionFormProps {
-  onSubmit: (payload: NewEmissionPayload) => Promise<void>;
+  onSubmit: (payload: NewEmissionPayload) => Promise<MutationResult>;
   isSubmitting: boolean;
   onCancel?: () => void;
 }
@@ -59,10 +59,27 @@ function validateForm(values: FormValues): FieldErrors {
   return errors;
 }
 
+const CATEGORY_OPTIONS = EMISSION_CATEGORIES.map((category) => ({
+  value: category,
+  label:
+    category === 'energia'
+      ? 'Energía'
+      : category === 'transporte'
+        ? 'Transporte'
+        : category === 'manufactura'
+          ? 'Manufactura'
+          : category === 'agricultura'
+            ? 'Agricultura'
+            : category === 'residuos'
+              ? 'Residuos'
+              : 'Otro',
+}));
+
 export function EmissionForm({ onSubmit, isSubmitting, onCancel }: EmissionFormProps) {
   const [values, setValues] = useState<FormValues>(initialValues);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [isDirty, setIsDirty] = useState(false);
+  const [submitMessage, setSubmitMessage] = useState<string | null>(null);
   const firstFieldRef = useRef<HTMLInputElement>(null);
 
   const isValid = useMemo(() => Object.keys(validateForm(values)).length === 0, [values]);
@@ -72,6 +89,7 @@ export function EmissionForm({ onSubmit, isSubmitting, onCancel }: EmissionFormP
   }, []);
 
   const handleChange = <K extends keyof FormValues>(field: K, nextValue: FormValues[K]) => {
+    setSubmitMessage(null);
     setValues((current) => {
       const nextValues = { ...current, [field]: nextValue };
 
@@ -94,16 +112,22 @@ export function EmissionForm({ onSubmit, isSubmitting, onCancel }: EmissionFormP
       return;
     }
 
-    await onSubmit({
+    const result = await onSubmit({
       source_name: values.source_name.trim(),
       category: values.category as EmissionCategory,
       co2_kg: Number(values.co2_kg),
       notes: values.notes.trim() ? values.notes.trim() : undefined,
     });
 
+    if (!result.ok) {
+      setSubmitMessage(result.message ?? 'No fue posible registrar la emisión.');
+      return;
+    }
+
     setValues(initialValues);
     setFieldErrors({});
     setIsDirty(false);
+    setSubmitMessage(null);
     onCancel?.();
   };
 
@@ -125,7 +149,7 @@ export function EmissionForm({ onSubmit, isSubmitting, onCancel }: EmissionFormP
         id="category"
         label="Categoría"
         value={values.category}
-        options={EMISSION_CATEGORIES.map((category) => ({ value: category, label: category }))}
+        options={CATEGORY_OPTIONS}
         onChange={(nextValue) => handleChange('category', nextValue as EmissionCategory | '')}
         placeholder="Selecciona una categoría"
         error={fieldErrors.category}
@@ -160,6 +184,8 @@ export function EmissionForm({ onSubmit, isSubmitting, onCancel }: EmissionFormP
         />
         {fieldErrors.notes ? <p className="text-xs text-error-600">{fieldErrors.notes}</p> : null}
       </div>
+
+      {submitMessage ? <FormFeedback message={submitMessage} tone="error" /> : null}
 
       {!isValid && isDirty ? <FormFeedback message="Revisa los campos marcados antes de continuar." tone="error" /> : null}
 
